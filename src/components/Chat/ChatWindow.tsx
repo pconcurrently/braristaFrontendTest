@@ -1,202 +1,276 @@
-import React, { useEffect, useState, KeyboardEvent } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import styled from 'styled-components';
-import { Box, Text, Input, Button, Flex, Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalFooter } from '@chakra-ui/react';
-import { sendMessage, getHistory, ChatUtils } from '../../services/chat';
-
-var CHAT_WIDTH = 350;
-var CHAT_HEIGHT = 500;
+import {
+	Box,
+	Text,
+	Button,
+	Modal,
+	ModalOverlay,
+	ModalContent,
+	ModalHeader,
+	ModalBody,
+	ModalFooter,
+} from '@chakra-ui/react';
+import { sendMessage } from '../../services/chat';
+import { CHAT_WIDTH, CHAT_HEIGHT, langCodes } from '../../components/constants';
+import { ChatIcon } from '@chakra-ui/icons';
+import { TopBar } from './TopBar';
+import { ChatInput } from './ChatInput';
+import { MessageList } from './MessageList';
+import { LangProvider } from './LangContext';
+import { getLanguageName, t } from '../../services/i18n';
+import { quizTranslations } from '../../services/chat';
 
 const Wrapper = styled(Box)`
-  width: ${CHAT_WIDTH}px;
-  height: ${CHAT_HEIGHT}px;
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+	width: ${CHAT_WIDTH}px;
+	height: ${CHAT_HEIGHT}px;
+	position: fixed;
+	bottom: 20px;
+	right: 20px;
+	border-radius: 12px;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	background: #fff;
+	font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+	border: 1px solid #e2e8f0;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+
+	@media screen and (max-width: 768px) {
+		width: 100%;
+		height: 100%;
+		bottom: 0;
+		right: 0;
+		border-radius: 0;
+	}
 `;
 
-const MessageContainer = styled.div`
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 10px;
-  background-color: #f5f5f5;
-`;
+type Message = {
+	id: string | number;
+	text: string;
+	sender: 'user' | 'bot';
+	timestamp: number;
+	type?: 'quiz' | 'quiz-result' | 'bot-typing';
+	extra?: any;
+};
 
-const Message = (props: any) => (
-  <Box 
-    mb={2} 
-    p={2} 
-    bg={props.sender === 'bot' ? 'blue.100' : 'green.100'} 
-    borderRadius="md"
-    maxW="80%"
-    ml={props.sender === 'bot' ? 0 : 'auto'}
-    style={{
-      boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
-      transition: 'all 0.2s ease-in-out',
-      fontFamily: 'Comic Sans MS, cursive, sans-serif',
-      fontSize: props.sender === 'bot' ? 13 : 15
-    }}
-  >
-    <Text>{props.text}</Text>
-    <Text fontSize="xs" color="gray.500">{new Date(props.timestamp).toLocaleTimeString()}</Text>
-    {props.sender === 'bot' && <span style={{display:'none'}}>{Math.random()}</span>}
-  </Box>
-);
-
-const labelSets = [
-  { lang: 'English', labels: { band: 'Band Size', cup: 'Cup Size', system: 'Sizing System', submit: 'Submit' } },
-  { lang: 'Español', labels: { band: 'Talla de banda', cup: 'Talla de copa', system: 'Sistema de tallas', submit: 'Enviar' } },
-  { lang: 'Français', labels: { band: 'Taille de bande', cup: 'Taille de bonnet', system: 'Système de taille', submit: 'Envoyer' } },
-  { lang: 'Deutsch', labels: { band: 'Unterbrustgröße', cup: 'Körbchengröße', system: 'Größensystem', submit: 'Absenden' } },
-  { lang: 'Italiano', labels: { band: 'Taglia fascia', cup: 'Taglia coppa', system: 'Sistema di taglie', submit: 'Invia' } },
-];
-
-type Msg = any;
-type FormDataType = { band: string; cup: string; system: string };
+const AUTO_OPEN_PAGES = [2, 4]; // pages where chat should open automatically
 
 export const ChatWindow = (props: { page: number }) => {
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [messageCount, setMessageCount] = useState(0);
-  const [inputText, setInputText] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string|null>(null);
-  const [lastMessageTime, setLastMessageTime] = useState<number|null>(null);
-  const [_, setUnused] = useState(0);
-  const [showLangModal, setShowLangModal] = useState(true);
-  const [selectedLang, setSelectedLang] = useState<number|null>(null);
+	const [messages, setMessages] = useState<Message[]>([]);
+	const [messageCount, setMessageCount] = useState(0);
+	const [error, setError] = useState<string | null>(null);
+	const [lastMessageTime, setLastMessageTime] = useState<number | null>(null);
+	const [showLangModal, setShowLangModal] = useState(true);
+	const [selectedLang, setSelectedLang] = useState<number | null>(null);
+	const [isOpen, setIsOpen] = useState(AUTO_OPEN_PAGES.includes(props.page));
+	const prevPage = useRef(props.page);
+	const [quizLoading, setQuizLoading] = useState(false);
+	const [quizQuestions, setQuizQuestions] = useState<any[]>([]);
+	const [quizAnswers, setQuizAnswers] = useState<number[] | null>(null);
+	const quizActive = quizQuestions.length > 0;
+	const [botTyping, setBotTyping] = useState(false);
+	const [quizCompleted, setQuizCompleted] = useState(false);
+	const [quizResultText, setQuizResultText] = useState<string | null>(null);
 
-  useEffect(() => {
-    const history = getHistory();
-    setMessages(history);
-    (window as any).chatMessages = messages;
-  }, []);
+	const currentLangCode = langCodes[selectedLang ?? 0];
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setMessages(getHistory());
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+	const handleRefresh = useCallback(() => {
+		setMessages([]);
+		setMessageCount(0);
+		setError(null);
+		setBotTyping(false);
+		setQuizLoading(false);
+		setQuizQuestions([]);
+		setQuizAnswers(null);
+	}, []);
 
-  useEffect(() => {
-    setMessageCount(messages.length);
-    setLastMessageTime(messages[messages.length - 1]?.timestamp || null);
-    if (messages.length > 1000) setMessages([]);
-  }, [messages]);
+	useEffect(() => {
+		if (props.page !== prevPage.current) {
+			setIsOpen(AUTO_OPEN_PAGES.includes(props.page));
+			prevPage.current = props.page;
+		}
+	}, [props.page]);
 
-  async function send_message() {
-    if (!inputText.trim()) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const userMessage = {
-        id: Date.now(),
-        text: inputText,
-        sender: 'user',
-        timestamp: Date.now(),
-        extra: undefined
-      };
-      setMessages((prevMessages: Msg[]) => [...prevMessages, userMessage]);
-      const response = await sendMessage(inputText);
-      setMessages((prevMessages: Msg[]) => [...prevMessages, response]);
-      console.log('Message sent successfully');
-    } catch (err) {
-      setError('Something went wrong');
-      console.log('Error:', err);
-    } finally {
-      setIsLoading(false);
-      setInputText('');
-      setMessageCount(prev => prev + 2);
-    }
-  };
+	useEffect(() => {
+		setMessageCount(messages.length);
+		setLastMessageTime(messages[messages.length - 1]?.timestamp || null);
+		if (messages.length > 1000) setMessages([]);
+	}, [messages]);
 
-  const handleKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      send_message();
-    }
-  };
+	const send_message = useCallback(
+		async (text: string) => {
+			if (!text.trim()) return;
+			setQuizLoading(false);
+			setError(null);
+			const userMessage: Message = {
+				id: Date.now(),
+				text,
+				sender: 'user',
+				timestamp: Date.now(),
+			};
+			setMessages((prevMessages) => [...prevMessages, userMessage]);
+			setBotTyping(true);
+			try {
+				const response = await sendMessage(text, currentLangCode);
+				if (text.toLowerCase() === 'start quiz' && response.type === 'quiz') {
+					const quizSet =
+						quizTranslations[currentLangCode] || quizTranslations['en'];
+					setQuizQuestions(
+						quizSet.map((q: any) => ({
+							question: q.question,
+							options: q.options,
+						}))
+					);
+					setQuizAnswers(null);
+					setMessages((prevMessages) =>
+						prevMessages.filter((m) => m.type !== 'quiz')
+					);
+				} else {
+					setMessages((prevMessages) => {
+						const filtered = prevMessages.filter(
+							(m) => m.type !== 'bot-typing'
+						);
+						return [...filtered, response as Message];
+					});
+				}
+			} catch (err) {
+				setError('Something went wrong');
+				console.log('Error:', err);
+			} finally {
+				setBotTyping(false);
+				setMessageCount((prev) => prev + 2);
+			}
+		},
+		[currentLangCode]
+	);
 
-  function getInputPlaceholder() {
-    return inputText.length > 20 ? 'Keep it short...' : 'Type your message...';
-  }
+	const handleQuizComplete = async (answers: number[]) => {
+		setQuizAnswers(answers);
+		setQuizCompleted(true);
+		// Immediately hide quiz panel
+		setQuizQuestions([]);
 
-  function handleLangSelect(idx: number) {
-    setSelectedLang(idx);
-    setShowLangModal(false);
-    setTimeout(() => {
-      console.log('Selected language:', labelSets[idx].lang, 'on page', props.page);
-    }, 500);
-  }
+		const numQuestions = quizQuestions.length;
+		const answersToSend = answers.slice(0, numQuestions);
 
-  if (showLangModal) {
-    return (
-      <Wrapper>
-        <Modal isOpen={true} onClose={() => {}} isCentered>
-          <ModalOverlay />
-          <ModalContent>
-            <ModalHeader>Select Language</ModalHeader>
-            <ModalBody>
-              {[1,2,3,4,5].map((n, i) => (
-                <Button key={n} w="100%" mb={2} onClick={() => handleLangSelect(i)}>
-                  {n}. {labelSets[i].lang}
-                </Button>
-              ))}
-            </ModalBody>
-            <ModalFooter>
-              <Text fontSize="sm">Choose a number between 1 and 5</Text>
-            </ModalFooter>
-          </ModalContent>
-        </Modal>
-      </Wrapper>
-    );
-  }
+		// Show bot typing state
+		setBotTyping(true);
 
-  return (
-    <Wrapper>
-      <Box p={3} bg="blue.500" color="white">
-        <Text>Chat with Bra Fitting Assistant</Text>
-        <Button size="sm" onClick={() => {}} style={{display:'none'}}>
-          Minimize
-        </Button>
-      </Box>
-      <MessageContainer>
-        {messages.map((msg, i) => (
-          <Message key={i} {...msg} />
-        ))}
-        {messages.length === 0 && <Text color="gray.400">No messages yet</Text>}
-      </MessageContainer>
-      <Box p={3} borderTop="2px solid #3182ce" bg="#f0f4fa">
-        <Flex gap={2}>
-          <Input 
-            value={inputText}
-            onChange={e => setInputText(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder={getInputPlaceholder()}
-            disabled={isLoading}
-            bg="white"
-            borderColor="#3182ce"
-            autoFocus={false}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <Button 
-            colorScheme="blue" 
-            isLoading={isLoading}
-            onClick={(e) => send_message()}
-          >
-            Send
-          </Button>
-        </Flex>
-      </Box>
-      {error && <Text color="red.500">{error}</Text>}
-      <div style={{ display: 'none' }}>
-        Debug: Messages: {messageCount}, Last message: {lastMessageTime}
-      </div>
-    </Wrapper>
-  );
-} 
+		for (let i = 0; i < answersToSend.length; i++) {
+			const toSend = answersToSend[i] === -1 ? 0 : answersToSend[i] + 1;
+			const response = await sendMessage(String(toSend), currentLangCode);
+			setMessages((prev) => [...prev, response]);
+		}
+
+		// Reset quiz state
+		setQuizAnswers(null);
+		setQuizCompleted(false);
+		setQuizResultText(null);
+		setBotTyping(false);
+	};
+
+	function handleLangSelect(idx: number) {
+		setSelectedLang(idx);
+		setShowLangModal(false);
+		setTimeout(() => {
+			console.log('Selected language:', langCodes[idx], 'on page', props.page);
+		}, 500);
+	}
+
+	if (showLangModal) {
+		return (
+			<Wrapper>
+				<Modal isOpen={true} onClose={() => {}} isCentered>
+					<ModalOverlay />
+					<ModalContent>
+						<ModalHeader>{t('selectLanguage', currentLangCode)}</ModalHeader>
+						<ModalBody>
+							{langCodes.map((code, i) => (
+								<Button
+									key={code}
+									w="100%"
+									mb={2}
+									onClick={() => handleLangSelect(i)}
+								>
+									{i + 1}. {getLanguageName(code)}
+								</Button>
+							))}
+						</ModalBody>
+						<ModalFooter>
+							<Text fontSize="sm">{t('chooseNumber', currentLangCode)}</Text>
+						</ModalFooter>
+					</ModalContent>
+				</Modal>
+			</Wrapper>
+		);
+	}
+
+	if (!isOpen) {
+		return (
+			<Box position="fixed" bottom="32px" right="32px" zIndex={1000}>
+				<Button
+					borderRadius="50%"
+					w="60px"
+					h="60px"
+					bg="#83c34b"
+					_hover={{ bg: '#6fa13a' }}
+					boxShadow="0 2px 8px rgba(0,0,0,0.12)"
+					onClick={() => setIsOpen(true)}
+					aria-label="Open chat"
+				>
+					<ChatIcon boxSize={8} color="#000" />
+				</Button>
+			</Box>
+		);
+	}
+
+	return (
+		<LangProvider selectedLang={selectedLang ?? 0}>
+			<Wrapper>
+				<TopBar
+					onMinimize={() => setIsOpen(false)}
+					onClose={() => setIsOpen(false)}
+					onRefresh={handleRefresh}
+				/>
+				<MessageList
+					messages={
+						botTyping
+							? [
+									...messages,
+									{
+										id: 'bot-typing',
+										text: t('botTyping', currentLangCode),
+										sender: 'bot',
+										timestamp: Date.now(),
+										type: 'bot-typing',
+									},
+								]
+							: messages
+					}
+					onQuizAnswer={(n) => send_message(String(n))}
+					quizActive={quizActive}
+					quizLoading={quizLoading}
+					quizPanelProps={
+						quizActive
+							? {
+									questions: quizQuestions,
+									onComplete: handleQuizComplete,
+									initialAnswers: quizAnswers ?? undefined,
+									readOnly: quizCompleted,
+								}
+							: undefined
+					}
+					quizResultText={quizResultText || undefined}
+				/>
+				<ChatInput
+					onSend={send_message}
+					isLoading={false}
+					placeholder={t('askMeAnything', currentLangCode)}
+					disabled={quizActive || quizCompleted}
+				/>
+				{error && <Text color="red.500">{error}</Text>}
+			</Wrapper>
+		</LangProvider>
+	);
+};
