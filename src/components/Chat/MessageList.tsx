@@ -54,23 +54,17 @@ const Message = (props: Message) => (
 
 export const MessageList = ({
 	messages,
-	onQuizAnswer,
 	quizActive,
-	quizLoading,
 	quizPanelProps,
-	quizResultText,
 }: {
 	messages: Message[];
-	onQuizAnswer: (n: number) => void;
 	quizActive: boolean;
-	quizLoading: boolean;
 	quizPanelProps?: {
 		questions: QuizQuestion[];
 		onComplete: (answers: number[]) => void;
 		initialAnswers?: number[];
 		readOnly?: boolean;
 	};
-	quizResultText?: string;
 }) => {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const { langCode } = useLang();

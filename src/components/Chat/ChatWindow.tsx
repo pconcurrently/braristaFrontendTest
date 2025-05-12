@@ -58,29 +58,21 @@ const AUTO_OPEN_PAGES = [2, 4]; // pages where chat should open automatically
 
 export const ChatWindow = (props: { page: number }) => {
 	const [messages, setMessages] = useState<Message[]>([]);
-	const [messageCount, setMessageCount] = useState(0);
 	const [error, setError] = useState<string | null>(null);
-	const [lastMessageTime, setLastMessageTime] = useState<number | null>(null);
 	const [showLangModal, setShowLangModal] = useState(true);
 	const [selectedLang, setSelectedLang] = useState<number | null>(null);
 	const [isOpen, setIsOpen] = useState(AUTO_OPEN_PAGES.includes(props.page));
 	const prevPage = useRef(props.page);
-	const [quizLoading, setQuizLoading] = useState(false);
 	const [quizQuestions, setQuizQuestions] = useState<any[]>([]);
 	const [quizAnswers, setQuizAnswers] = useState<number[] | null>(null);
 	const quizActive = quizQuestions.length > 0;
-	const [botTyping, setBotTyping] = useState(false);
 	const [quizCompleted, setQuizCompleted] = useState(false);
-	const [quizResultText, setQuizResultText] = useState<string | null>(null);
 
 	const currentLangCode = langCodes[selectedLang ?? 0];
 
 	const handleRefresh = useCallback(() => {
 		setMessages([]);
-		setMessageCount(0);
 		setError(null);
-		setBotTyping(false);
-		setQuizLoading(false);
 		setQuizQuestions([]);
 		setQuizAnswers(null);
 	}, []);
@@ -93,15 +85,12 @@ export const ChatWindow = (props: { page: number }) => {
 	}, [props.page]);
 
 	useEffect(() => {
-		setMessageCount(messages.length);
-		setLastMessageTime(messages[messages.length - 1]?.timestamp || null);
 		if (messages.length > 1000) setMessages([]);
 	}, [messages]);
 
 	const send_message = useCallback(
 		async (text: string) => {
 			if (!text.trim()) return;
-			setQuizLoading(false);
 			setError(null);
 			const userMessage: Message = {
 				id: Date.now(),
@@ -110,7 +99,6 @@ export const ChatWindow = (props: { page: number }) => {
 				timestamp: Date.now(),
 			};
 			setMessages((prevMessages) => [...prevMessages, userMessage]);
-			setBotTyping(true);
 			try {
 				const response = await sendMessage(text, currentLangCode);
 				if (text.toLowerCase() === 'start quiz' && response.type === 'quiz') {
@@ -137,9 +125,6 @@ export const ChatWindow = (props: { page: number }) => {
 			} catch (err) {
 				setError('Something went wrong');
 				console.log('Error:', err);
-			} finally {
-				setBotTyping(false);
-				setMessageCount((prev) => prev + 2);
 			}
 		},
 		[currentLangCode]
@@ -154,9 +139,6 @@ export const ChatWindow = (props: { page: number }) => {
 		const numQuestions = quizQuestions.length;
 		const answersToSend = answers.slice(0, numQuestions);
 
-		// Show bot typing state
-		setBotTyping(true);
-
 		for (let i = 0; i < answersToSend.length; i++) {
 			const toSend = answersToSend[i] === -1 ? 0 : answersToSend[i] + 1;
 			const response = await sendMessage(String(toSend), currentLangCode);
@@ -166,8 +148,6 @@ export const ChatWindow = (props: { page: number }) => {
 		// Reset quiz state
 		setQuizAnswers(null);
 		setQuizCompleted(false);
-		setQuizResultText(null);
-		setBotTyping(false);
 	};
 
 	function handleLangSelect(idx: number) {
@@ -234,34 +214,18 @@ export const ChatWindow = (props: { page: number }) => {
 					onRefresh={handleRefresh}
 				/>
 				<MessageList
-					messages={
-						botTyping
-							? [
-									...messages,
-									{
-										id: 'bot-typing',
-										text: t('botTyping', currentLangCode),
-										sender: 'bot',
-										timestamp: Date.now(),
-										type: 'bot-typing',
-									},
-								]
-							: messages
-					}
-					onQuizAnswer={(n) => send_message(String(n))}
+					messages={messages}
 					quizActive={quizActive}
-					quizLoading={quizLoading}
 					quizPanelProps={
 						quizActive
 							? {
 									questions: quizQuestions,
 									onComplete: handleQuizComplete,
-									initialAnswers: quizAnswers ?? undefined,
+									initialAnswers: quizAnswers || undefined,
 									readOnly: quizCompleted,
 								}
 							: undefined
 					}
-					quizResultText={quizResultText || undefined}
 				/>
 				<ChatInput
 					onSend={send_message}
