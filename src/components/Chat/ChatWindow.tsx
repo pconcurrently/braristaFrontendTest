@@ -99,6 +99,16 @@ export const ChatWindow = (props: { page: number }) => {
 				timestamp: Date.now(),
 			};
 			setMessages((prevMessages) => [...prevMessages, userMessage]);
+
+			const loadingMessage: Message = {
+				id: Date.now(),
+				text: '',
+				sender: 'bot',
+				timestamp: Date.now(),
+				type: 'bot-typing',
+			};
+			setMessages((prevMessages) => [...prevMessages, loadingMessage]);
+
 			try {
 				const response = await sendMessage(text, currentLangCode);
 				if (text.toLowerCase() === 'start quiz' && response.type === 'quiz') {
@@ -112,7 +122,9 @@ export const ChatWindow = (props: { page: number }) => {
 					);
 					setQuizAnswers(null);
 					setMessages((prevMessages) =>
-						prevMessages.filter((m) => m.type !== 'quiz')
+						prevMessages.filter(
+							(m) => m.type !== 'quiz' && m.type !== 'bot-typing'
+						)
 					);
 				} else {
 					setMessages((prevMessages) => {
@@ -125,6 +137,9 @@ export const ChatWindow = (props: { page: number }) => {
 			} catch (err) {
 				setError('Something went wrong');
 				console.log('Error:', err);
+				setMessages((prevMessages) =>
+					prevMessages.filter((m) => m.type !== 'bot-typing')
+				);
 			}
 		},
 		[currentLangCode]
@@ -139,11 +154,27 @@ export const ChatWindow = (props: { page: number }) => {
 		const numQuestions = quizQuestions.length;
 		const answersToSend = answers.slice(0, numQuestions);
 
+		// Add loading state message
+		const loadingMessage: Message = {
+			id: Date.now(),
+			text: '',
+			sender: 'bot',
+			timestamp: Date.now(),
+			type: 'bot-typing',
+		};
+		setMessages((prev) => [...prev, loadingMessage]);
+
+		const responses: Message[] = [];
 		for (let i = 0; i < answersToSend.length; i++) {
 			const toSend = answersToSend[i] === -1 ? 0 : answersToSend[i] + 1;
 			const response = await sendMessage(String(toSend), currentLangCode);
-			setMessages((prev) => [...prev, response]);
+			responses.push(response as Message);
 		}
+
+		setMessages((prev) => {
+			const filtered = prev.filter((m) => m.type !== 'bot-typing');
+			return [...filtered, ...responses];
+		});
 
 		// Reset quiz state
 		setQuizAnswers(null);
